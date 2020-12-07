@@ -86,9 +86,7 @@ import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
-import org.apache.flink.runtime.state.filesystem.FsStateBackend;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -102,8 +100,14 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.List;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * @author jiangbo
@@ -117,20 +121,43 @@ public class LocalTest {
     public static Configuration conf = new Configuration();
 
     public static void main(String[] args) throws Exception{
-//        setLogLevel(Level.DEBUG.toString());
+        setLogLevel(Level.INFO.toString());
         Properties confProperties = new Properties();
-//        confProperties.put("flink.checkpoint.interval", "10000");
-//        confProperties.put("flink.checkpoint.stateBackend", "file:///tmp/flinkx_checkpoint");
+        confProperties.put("flink.checkpoint.interval", "10000");
 
-//        conf.setString("metrics.reporter.promgateway.class","org.apache.flink.metrics.prometheus.PrometheusPushGatewayReporter");
-//        conf.setString("metrics.reporter.promgateway.host","127.0.0.1");
-//        conf.setString("metrics.reporter.promgateway.port","9091");
-//        conf.setString("metrics.reporter.promgateway.jobName","108job");
-//        conf.setString("metrics.reporter.promgateway.randomJobNameSuffix","true");
-//        conf.setString("metrics.reporter.promgateway.deleteOnShutdown","true");
 
-        String jobPath = "D:\\dtstack\\flinkx-all\\flinkx-test\\src\\main\\resources\\dev_test_job\\metadatasqlserver_stream.json";
-        JobExecutionResult result = LocalTest.runJob(new File(jobPath), confProperties, null);
+    /*    conf.setString("metrics.reporter.promgateway.class","org.apache.flink.metrics.prometheus.PrometheusPushGatewayReporter");
+        conf.setString("metrics.reporter.promgateway.host","127.0.0.1");
+        conf.setString("metrics.reporter.promgateway.port","9091");
+        conf.setString("metrics.reporter.promgateway.jobName","108job");
+        conf.setString("metrics.reporter.promgateway.randomJobNameSuffix","true");
+        conf.setString("metrics.reporter.promgateway.deleteOnShutdown","true");*/
+
+
+        /** 网络配置 **/
+        conf.setString("akka.ask.timeout", "600s");
+        conf.setString("web.timeout", "100000");
+        conf.setString("rest.bind-port","8888");
+
+        /** state配置 **/
+        conf.setString("state.backend","filesystem");
+        conf.setBoolean("state.backend.local-recovery",true);
+        conf.setString("state.checkpoints.dir","file:///tmp/flinkx/checkpoint");
+        conf.setString("state.checkpoints.num-retained","3");
+
+        /** taskmanager配置 **/
+        conf.setString("taskmanager.state.local.root-dirs","/tmp/flinkx/task_state");
+
+        /** 监控配置 **/
+        conf.setString("metrics.reporter.jmx.factory.class","org.apache.flink.metrics.jmx.JMXReporterFactory");
+        conf.setString("metrics.reporter.jmx.port","8789");
+
+
+
+        String jobPath = "/Users/felix/data/github/flinkx/flinkx-test/src/main/resources/mysql_binlog.json";
+        String savePointPath = latestSavePointPath("/tmp/flinkx/checkpoint");
+        LOG.warn("SavePoint path : {}" , savePointPath);
+        JobExecutionResult result = LocalTest.runJob(new File(jobPath), confProperties, savePointPath);
         ResultPrintUtil.printResult(result);
         System.exit(0);
     }
@@ -142,9 +169,6 @@ public class LocalTest {
 
     public static JobExecutionResult runJob(String job, Properties confProperties, String savepointPath) throws Exception{
         DataTransferConfig config = DataTransferConfig.parse(job);
-
-        conf.setString("akka.ask.timeout", "180 s");
-        conf.setString("web.timeout", String.valueOf(100000));
 
         MyLocalStreamEnvironment env = new MyLocalStreamEnvironment(conf);
 
@@ -180,7 +204,8 @@ public class LocalTest {
             env.setSettings(SavepointRestoreSettings.forPath(savepointPath));
         }
 
-        return env.execute();
+
+        return env.execute("LocalTest");
     }
 
     private static boolean needRestart(DataTransferConfig config){
@@ -297,12 +322,10 @@ public class LocalTest {
             LOG.info("Set checkpoint timeout:" + checkpointTimeout);
         }
 
-        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
+        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.AT_LEAST_ONCE);
         env.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
         env.getCheckpointConfig().enableExternalizedCheckpoints(
                 CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION);
-
-        env.setStateBackend(new FsStateBackend(new Path("file:///tmp/flinkx_checkpoint")));
         env.setRestartStrategy(RestartStrategies.failureRateRestart(
                 FAILURE_RATE,
                 Time.of(FAILURE_INTERVAL, TimeUnit.MINUTES),
@@ -314,5 +337,40 @@ public class LocalTest {
         LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
         ch.qos.logback.classic.Logger logger = loggerContext.getLogger("root");
         logger.setLevel(Level.toLevel(level));
+    }
+
+    private static String latestSavePointPath(String savePointDir) throws Exception {
+        java.nio.file.Path dir = Paths.get(savePointDir);
+        if (Files.isDirectory(dir)) {
+            String chkAbsPath = null;
+
+            List<Path> jobPathList = Files.list(dir)
+                    .filter(p -> Files.isDirectory(p))
+                    .sorted((p1, p2) -> Long.valueOf(p2.toFile().lastModified())
+                            .compareTo(p1.toFile().lastModified()))
+                    .collect(Collectors.toList());
+
+          exit:
+          for(Path jobPath : jobPathList){
+              List<Path> chkPathList = Files.list(jobPath)
+                      .filter(p -> Files.isDirectory(p))
+                      .filter(p -> p.toFile().getName().startsWith("chk-"))
+                      .sorted((p1, p2)-> Long.valueOf(p2.toFile().lastModified())
+                              .compareTo(p1.toFile().lastModified()))
+                      .collect(Collectors.toList());
+
+              for(Path chkPath : chkPathList){
+                  //chk目录不为空
+                  if(chkPath.toFile().list().length > 0){
+                      chkAbsPath = chkPath.toAbsolutePath().toString();
+                      break exit;
+                  }
+              }
+
+          }
+
+            return chkAbsPath;
+        }
+        throw new IllegalArgumentException("[" + savePointDir+"] is not a valid savePoint dir !");
     }
 }

@@ -232,7 +232,8 @@ public class DtInputFormatSourceFunction<OUT> extends InputFormatSourceFunction<
 	@Override
 	public void snapshotState(FunctionSnapshotContext context) throws Exception {
         FormatState formatState = ((BaseRichInputFormat) format).getFormatState();
-        if (formatState != null){
+        // FormatState#state为空时，checkpoint会覆盖之前的位点信息
+        if (formatState != null && formatState.getState() != null){
             LOG.info("InputFormat format state:{}", formatState.toString());
             unionOffsetStates.clear();
             unionOffsetStates.add(formatState);

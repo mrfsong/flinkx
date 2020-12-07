@@ -1,0 +1,44 @@
+{
+  "job" : {
+    "content" : [ {
+      "reader" : {
+        "parameter" : {
+          "schema" : "dcomb",
+          "host" : "localhost",
+          "username" : "repl",
+          "password" : "mysql57",
+          "port" : 3358,
+          "jdbcUrl" : "jdbc:mysql://localhost:3358/dcomb",
+          "start" : {
+          },
+          "filter" : "dcomb\\..*",
+          "pavingData" : false
+        },
+        "name" : "binlogreader"
+      },
+      "writer" : {
+        "parameter" : {
+          "print" : true
+        },
+        "name" : "streamwriter"
+      }
+    } ],
+    "setting" : {
+      "restore" : {
+        "isRestore" : false,
+        "isStream" : true
+      },
+      "errorLimit" : { },
+      "speed" : {
+        "bytes" : 0,
+        "channel" : 1
+      },
+      "log" : {
+        "isLogger": true,
+        "level" : "trace",
+        "path" : "/Users/felix/data/app/flinkx/logs/job-",
+        "pattern":""
+      }
+    }
+  }
+}

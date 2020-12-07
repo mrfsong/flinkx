@@ -20,8 +20,11 @@ package com.dtstack.flinkx.binlog.reader;
 import com.dtstack.flinkx.config.DataTransferConfig;
 import com.dtstack.flinkx.config.ReaderConfig;
 import com.dtstack.flinkx.reader.BaseDataReader;
+import org.apache.flink.api.java.functions.KeySelector;
+import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.timestamps.AscendingTimestampExtractor;
 import org.apache.flink.types.Row;
 
 /**
@@ -37,7 +40,7 @@ public class BinlogReader extends BaseDataReader {
     public BinlogReader(DataTransferConfig config, StreamExecutionEnvironment env) {
         super(config, env);
         ReaderConfig readerConfig = config.getJob().getContent().get(0).getReader();
-
+        env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
         try {
             binlogConfig = objectMapper.readValue(objectMapper.writeValueAsString(readerConfig.getParameter().getAll()), BinlogConfig.class);
         } catch (Exception e) {
@@ -53,7 +56,24 @@ public class BinlogReader extends BaseDataReader {
         format.setRestoreConfig(restoreConfig);
         format.setLogConfig(logConfig);
         format.setTestConfig(testConfig);
-        return createInput(format);
+        DataStream<Row> source = createInput(format);
+        //flink默认使用processTime语义、数据源强一致性场景需要手动指定时间语义与Watermark
+       /* source.assignTimestampsAndWatermarks(new AscendingTimestampExtractor<Row>() {
+            @Override
+            public long extractAscendingTimestamp(Row element) {
+                int lastTsIndex = (element.getArity() - 1);
+                return (Long)element.getField(lastTsIndex);
+            }
+        });
+
+        //强制指定按照Pk进行keyBy
+        return source.keyBy(new KeySelector<Row, String>() {
+            @Override
+            public String getKey(Row value) throws Exception {
+                return null;
+            }
+        });*/
+        return source;
     }
 
 }

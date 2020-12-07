@@ -23,19 +23,19 @@ import com.alibaba.otter.canal.sink.exception.CanalSinkException;
 import com.dtstack.flinkx.util.SnowflakeIdWorker;
 import com.dtstack.flinkx.log.DtLogger;
 import com.dtstack.flinkx.util.ExceptionUtil;
+import com.google.common.collect.Sets;
 import com.google.gson.Gson;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.flink.types.Row;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.SynchronousQueue;
+import java.util.stream.Collectors;
 
 /**
  * @author toutian
@@ -78,9 +78,11 @@ public class BinlogEventSink extends AbstractCanalLifeCycle implements com.aliba
             }
 
             CanalEntry.Header header = entry.getHeader();
-            String schema = header.getSchemaName();
+           /* String schema = header.getSchemaName();
             String table = header.getTableName();
-            processRowChange(rowChange, schema, table);
+            processRowChange(rowChange, schema, table);*/
+
+            processRowChange(rowChange,header);
         }
 
         return true;
@@ -109,6 +111,9 @@ public class BinlogEventSink extends AbstractCanalLifeCycle implements com.aliba
             message.put("schema", schema);
             message.put("table", table);
             message.put("ts", idWorker.nextId());
+            message.put("pk","");
+
+
 
             if (pavingData){
                 for (CanalEntry.Column column : rowData.getAfterColumnsList()) {
@@ -133,6 +138,108 @@ public class BinlogEventSink extends AbstractCanalLifeCycle implements com.aliba
                 LOG.trace("message = {}", new Gson().toJson(message));
             }
         }
+
+        if(CollectionUtils.isEmpty(rowChange.getRowDatasList())){
+            Map<String,Object> message = new HashMap<>(8);
+            message.put("type", eventType.toString());
+            message.put("schema", schema);
+            message.put("table", table);
+            message.put("ts", idWorker.nextId());
+
+            try {
+                queue.put(message);
+            } catch (InterruptedException e) {
+                LOG.error("takeEvent interrupted message:{} error:{}", message, e);
+            }
+            if(DtLogger.isEnableTrace()){
+                //log level is trace, so don't care the performance，just new it.
+                LOG.trace("message = {}", new Gson().toJson(message));
+            }
+        }
+
+
+    }
+
+    private void processRowChange(CanalEntry.RowChange rowChange, CanalEntry.Header header) {
+        CanalEntry.EventType eventType = rowChange.getEventType();
+
+        String schema = header.getSchemaName();
+        String table = header.getTableName();
+        long executeTime = header.getExecuteTime();
+
+        if(!format.accept(eventType.toString())) {
+            return;
+        }
+
+        for(CanalEntry.RowData rowData : rowChange.getRowDatasList()) {
+            Map<String,Object> message = new HashMap<>(8);
+            message.put("type", eventType.toString());
+            message.put("schema", schema);
+            message.put("table", table);
+            message.put("ts", idWorker.nextId());
+            message.put("eventTime",executeTime);   //binlog事件时间
+
+            /** 解析表主键  **/
+            Set<String> pkSet = Sets.newHashSet();
+            for (CanalEntry.Column column : rowData.getAfterColumnsList()) {
+                if(column.getIsKey()){
+                    pkSet.add(column.getValue());
+                }
+            }
+            for (CanalEntry.Column column : rowData.getBeforeColumnsList()){
+                if(column.getIsKey()){
+                    pkSet.add(column.getValue());
+                }
+            }
+
+            if(!pkSet.isEmpty()){
+                String pk = pkSet.stream().sorted().collect(Collectors.joining("|"));
+                message.put("pk",pk);                   //业务主键
+            }
+
+
+            if (pavingData){
+                for (CanalEntry.Column column : rowData.getAfterColumnsList()) {
+                    message.put("after_" + column.getName(), column.getValue());
+                }
+                for (CanalEntry.Column column : rowData.getBeforeColumnsList()){
+                    message.put("before_" + column.getName(), column.getValue());
+                }
+            } else {
+                message.put("before", processColumnList(rowData.getBeforeColumnsList()));
+                message.put("after", processColumnList(rowData.getAfterColumnsList()));
+                message = Collections.singletonMap("message", message);
+            }
+
+            try {
+                queue.put(message);
+            } catch (InterruptedException e) {
+                LOG.error("takeEvent interrupted message:{} error:{}", message, e);
+            }
+            if(DtLogger.isEnableTrace()){
+                //log level is trace, so don't care the performance，just new it.
+                LOG.trace("message = {}", new Gson().toJson(message));
+            }
+        }
+
+        if(CollectionUtils.isEmpty(rowChange.getRowDatasList())){
+            Map<String,Object> message = new HashMap<>(8);
+            message.put("type", eventType.toString());
+            message.put("schema", schema);
+            message.put("table", table);
+            message.put("ts", idWorker.nextId());
+
+            try {
+                queue.put(message);
+            } catch (InterruptedException e) {
+                LOG.error("takeEvent interrupted message:{} error:{}", message, e);
+            }
+            if(DtLogger.isEnableTrace()){
+                //log level is trace, so don't care the performance，just new it.
+                LOG.trace("message = {}", new Gson().toJson(message));
+            }
+        }
+
 
     }
 

@@ -159,12 +159,15 @@ public abstract class BaseRichInputFormat extends org.apache.flink.api.common.io
             initAccumulatorCollector();
             initStatisticsAccumulator();
             openByteRateLimiter();
-            initRestoreInfo();
 
+            /*initRestoreInfo();
             if(restoreConfig.isRestore()){
                 formatState.setNumOfSubTask(indexOfSubTask);
-            }
+            }*/
 
+            if(formatState == null){
+                formatState = new FormatState(indexOfSubTask, null);
+            }
             inited = true;
         }
 

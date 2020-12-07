@@ -27,9 +27,11 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import org.apache.flink.api.common.io.InputFormat;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.typeutils.TypeExtractor;
+import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import com.dtstack.flinkx.streaming.api.functions.source.DtInputFormatSourceFunction;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.timestamps.AscendingTimestampExtractor;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.Preconditions;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -141,7 +143,8 @@ public abstract class BaseDataReader {
     }
 
     protected DataStream<Row> createInput(InputFormat inputFormat) {
-        return createInput(inputFormat,this.getClass().getSimpleName().toLowerCase());
+        return createInput(inputFormat, this.getClass().getSimpleName().toLowerCase());
+
     }
 
 }

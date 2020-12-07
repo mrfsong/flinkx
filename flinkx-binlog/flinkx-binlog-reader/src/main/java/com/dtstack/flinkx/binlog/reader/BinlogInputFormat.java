@@ -157,15 +157,16 @@ public class BinlogInputFormat extends BaseRichInputFormat {
 
     @Override
     public FormatState getFormatState() {
-        if (!restoreConfig.isRestore()) {
+       /* if (!restoreConfig.isRestore()) {
             LOG.info("return null for formatState");
             return null;
-        }
+        }*/
 
         super.getFormatState();
-        if (formatState != null) {
+        if (formatState != null && entryPosition != null) {
             formatState.setState(entryPosition);
         }
+
         return formatState;
     }
 
